@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+  <title>テレプロンプター</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+      color: #f3f5f4;
+      background: #101211;
+      --panel: #191c1a;
+      --border: #323832;
+      --muted: #a9b4ac;
+      --accent: #a7edb5;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; }
+    h1, h2, p { margin: 0; }
+    button, textarea, input { font: inherit; }
+
+    .app {
+      width: min(1360px, 100%);
+      margin: 0 auto;
+      padding: clamp(16px, 4vw, 56px);
+    }
+
+    .app-header { margin-bottom: 26px; }
+    h1 { font-size: clamp(24px, 4vw, 36px); letter-spacing: -.03em; }
+    h2, .panel-title { font-size: 15px; font-weight: 700; }
+    .caption { color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+
+    .prompter { display: flex; flex-direction: column; overflow: hidden; }
+    .prompter-header, .toolbar, .editor-header, .slider-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .prompter-header { padding: 14px 18px; flex-wrap: wrap; }
+    .prompter-actions, .playback-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    button {
+      min-height: 36px;
+      padding: 6px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #242925;
+      color: inherit;
+      font-size: 13px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) { background: #353e37; }
+    button:disabled { opacity: .48; cursor: default; }
+    button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+    .primary { background: var(--accent); border-color: transparent; color: #132218; }
+    .primary:hover:not(:disabled) { background: #c5f8ce; }
+    .primary:disabled { opacity: 1; background: #34453a; color: #c8d6cc; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+    .screen {
+      position: relative;
+      height: clamp(320px, 54vh, 610px);
+      background: #000;
+      color: #fff;
+      overflow: hidden;
+      border-block: 1px solid var(--border);
+    }
+
+    .screen::before {
+      content: "";
+      position: absolute;
+      inset: 50% 0 auto;
+      height: 1px;
+      background: var(--accent);
+      opacity: .45;
+      pointer-events: none;
+    }
+
+    .viewport {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+
+    .viewport::-webkit-scrollbar { display: none; }
+    .viewport:focus-visible { outline-offset: -3px; }
+
+    .script {
+      --font-size: 48px;
+      min-height: 100%;
+      width: min(100%, 1100px);
+      margin: 0 auto;
+      padding: 0 clamp(18px, 6vw, 72px);
+      font-size: var(--font-size);
+      line-height: 1.6;
+      font-weight: 600;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .viewport[data-mirror="true"] .script,
+    .screen[data-mirror="true"] .empty-message { transform: scaleX(-1); }
+
+    .empty-message {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      gap: 10px;
+      padding: 24px;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .empty-message strong { font-size: clamp(20px, 3vw, 29px); }
+    .toolbar { min-height: 68px; padding: 12px 18px; flex-wrap: wrap; }
+    .status::before {
+      content: "";
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 7px;
+      vertical-align: 2px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .status[data-playing="true"] { color: var(--accent); }
+    .shortcut { margin-top: 10px; }
+    kbd {
+      padding: 1px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font: inherit;
+    }
+
+    .sidebar { display: grid; gap: 16px; }
+    .editor, .settings { padding: 17px; }
+    .editor-header { margin-bottom: 12px; flex-wrap: wrap; }
+    .save-status[data-error="true"], .notice { color: #ffd194; }
+
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 160px;
+      height: clamp(180px, 31vh, 320px);
+      resize: vertical;
+      padding: 12px;
+      background: #111412;
+      color: inherit;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    textarea::placeholder { color: #909d93; }
+    .settings h2 { margin-bottom: 14px; }
+    .slider + .slider { margin-top: 13px; }
+    .slider-label { font-size: 14px; }
+    output { color: var(--accent); font-size: 13px; font-variant-numeric: tabular-nums; }
+    input[type="range"] { display: block; width: 100%; margin: 6px 0 0; accent-color: var(--accent); }
+    .notice { padding: 0 18px 12px; font-size: 13px; }
+
+    .prompter:fullscreen {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      border-radius: 0;
+    }
+    .prompter:fullscreen .screen { flex: 1; height: auto; min-height: 0; }
+
+    @media (max-width: 780px) {
+      .workspace { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="app-header">
+      <h1>テレプロンプター</h1>
+    </header>
+
+    <div class="workspace">
+      <div>
+        <section id="prompter" class="panel prompter" aria-labelledby="screen-title">
+          <header class="prompter-header">
+            <h2 id="screen-title">読み上げ画面</h2>
+            <div class="prompter-actions">
+              <button id="mirror" type="button" aria-pressed="false">ミラー</button>
+              <button id="fullscreen" type="button">全画面表示</button>
+            </div>
+          </header>
+
+          <div id="screen" class="screen">
+            <div id="viewport" class="viewport" tabindex="0" aria-label="原稿の表示">
+              <div id="script" class="script"></div>
+            </div>
+            <div id="empty-message" class="empty-message">
+              <strong>原稿を入力してください</strong>
+              <p class="caption">入力した原稿がここに表示されます</p>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <div class="playback-actions">
+              <button id="start" class="primary" type="button" disabled>スタート</button>
+              <button id="pause" type="button" disabled>一時停止</button>
+              <button id="rewind" type="button" disabled>先頭に戻す</button>
+            </div>
+            <p id="playback-status" class="caption status" aria-live="polite">原稿待ち</p>
+          </div>
+
+          <p id="notice" class="notice" role="status" hidden></p>
+        </section>
+
+        <p class="caption shortcut"><kbd>スペース</kbd> で再生・一時停止（原稿入力中を除く）</p>
+      </div>
+
+      <div class="sidebar">
+        <section class="panel editor" aria-labelledby="editor-title">
+          <div class="editor-header">
+            <label id="editor-title" class="panel-title" for="draft">原稿</label>
+            <span id="save-status" class="caption save-status" role="status">このブラウザに保存</span>
+          </div>
+          <textarea id="draft" placeholder="読み上げる原稿をここに貼り付けてください。" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off"></textarea>
+        </section>
+
+        <section class="panel settings" aria-labelledby="settings-title">
+          <h2 id="settings-title">表示設定</h2>
+          <div class="slider">
+            <div class="slider-label">
+              <label for="speed">スクロール速度</label>
+              <output id="speed-value" for="speed">60 px/秒</output>
+            </div>
+            <input id="speed" type="range" min="15" max="240" step="5" value="60">
+          </div>
+          <div class="slider">
+            <div class="slider-label">
+              <label for="font-size">文字の大きさ</label>
+              <output id="font-size-value" for="font-size">48 px</output>
+            </div>
+            <input id="font-size" type="range" min="20" max="120" step="2" value="48">
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    "use strict";
+
+    const storageKey = "teleprompter.draft";
+    const draft = document.querySelector("#draft");
+    const script = document.querySelector("#script");
+    const screen = document.querySelector("#screen");
+    const viewport = document.querySelector("#viewport");
+    const emptyMessage = document.querySelector("#empty-message");
+    const saveStatus = document.querySelector("#save-status");
+    const playbackStatus = document.querySelector("#playback-status");
+    const prompter = document.querySelector("#prompter");
+    const start = document.querySelector("#start");
+    const pause = document.querySelector("#pause");
+    const rewind = document.querySelector("#rewind");
+    const mirror = document.querySelector("#mirror");
+    const fullscreen = document.querySelector("#fullscreen");
+    const speed = document.querySelector("#speed");
+    const fontSize = document.querySelector("#font-size");
+    const speedValue = document.querySelector("#speed-value");
+    const fontSizeValue = document.querySelector("#font-size-value");
+    const notice = document.querySelector("#notice");
+
+    let frame = null;
+    let lastTime = null;
+    let position = 0;
+    let appliedPosition = 0;
+    let hasScript = false;
+
+    function updateStatus(label, playing = false) {
+      playbackStatus.textContent = label;
+      playbackStatus.dataset.playing = String(playing);
+      start.disabled = !hasScript || playing;
+      pause.disabled = !playing;
+      rewind.disabled = !hasScript;
+    }
+
+    function stop(label) {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+      lastTime = null;
+      updateStatus(label);
+    }
+
+    function goToTop() {
+      viewport.scrollTop = 0;
+      position = 0;
+      appliedPosition = 0;
+    }
+
+    function updateSpacing() {
+      const height = viewport.clientHeight;
+      script.style.paddingBlock = hasScript ? height * 0.72 + "px " + height + "px" : "0";
+    }
+
+    function showDraft() {
+      hasScript = draft.value.trim().length > 0;
+      script.textContent = hasScript ? draft.value : "";
+      emptyMessage.hidden = hasScript;
+      updateSpacing();
+      goToTop();
+      stop(hasScript ? "準備完了" : "原稿待ち");
+    }
+
+    function showStorageError() {
+      saveStatus.textContent = "このブラウザでは保存できません";
+      saveStatus.dataset.error = "true";
+    }
+
+    function saveDraft() {
+      try {
+        localStorage.setItem(storageKey, draft.value);
+        saveStatus.textContent = "このブラウザに保存済み";
+        delete saveStatus.dataset.error;
+      } catch {
+        showStorageError();
+      }
+    }
+
+    function maxScroll() {
+      return viewport.scrollHeight - viewport.clientHeight;
+    }
+
+    function scrollFrame(time) {
+      const elapsed = lastTime === null ? 0 : Math.min(time - lastTime, 100);
+      lastTime = time;
+
+      // Keep fractional pixels between frames and follow any manual scrolling.
+      if (viewport.scrollTop !== appliedPosition) position = viewport.scrollTop;
+      const limit = maxScroll();
+      position = Math.min(limit, position + Number(speed.value) * elapsed / 1000);
+      viewport.scrollTop = position;
+      appliedPosition = viewport.scrollTop;
+
+      if (position >= limit) {
+        stop("原稿の終わり");
+      } else {
+        frame = requestAnimationFrame(scrollFrame);
+      }
+    }
+
+    function startPlayback() {
+      if (!hasScript || frame !== null) return;
+      if (viewport.scrollTop >= maxScroll() - 1) goToTop();
+      position = viewport.scrollTop;
+      appliedPosition = position;
+      updateStatus("再生中", true);
+      frame = requestAnimationFrame(scrollFrame);
+    }
+
+    function updateSpeed() {
+      speedValue.value = speed.value + " px/秒";
+      speed.setAttribute("aria-valuetext", speed.value + " ピクセル毎秒");
+    }
+
+    function updateFontSize() {
+      fontSizeValue.value = fontSize.value + " px";
+      fontSize.setAttribute("aria-valuetext", fontSize.value + " ピクセル");
+      script.style.setProperty("--font-size", fontSize.value + "px");
+    }
+
+    draft.addEventListener("input", () => {
+      showDraft();
+      saveDraft();
+    });
+
+    start.addEventListener("click", () => {
+      viewport.focus({ preventScroll: true });
+      startPlayback();
+    });
+
+    pause.addEventListener("click", () => {
+      viewport.focus({ preventScroll: true });
+      stop("一時停止中");
+    });
+
+    rewind.addEventListener("click", () => {
+      goToTop();
+      stop("準備完了");
+      viewport.focus({ preventScroll: true });
+    });
+
+    speed.addEventListener("input", updateSpeed);
+    fontSize.addEventListener("input", updateFontSize);
+
+    mirror.addEventListener("click", () => {
+      const mirrored = mirror.getAttribute("aria-pressed") !== "true";
+      mirror.setAttribute("aria-pressed", String(mirrored));
+      viewport.dataset.mirror = String(mirrored);
+      screen.dataset.mirror = String(mirrored);
+    });
+
+    fullscreen.addEventListener("click", async () => {
+      notice.hidden = true;
+      try {
+        if (document.fullscreenElement === prompter) {
+          await document.exitFullscreen();
+        } else {
+          await prompter.requestFullscreen();
+        }
+        viewport.focus({ preventScroll: true });
+      } catch {
+        notice.textContent = "このブラウザでは全画面表示に切り替えられませんでした。";
+        notice.hidden = false;
+      }
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      fullscreen.textContent = document.fullscreenElement === prompter ? "全画面を終了" : "全画面表示";
+      updateSpacing();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.code !== "Space" || event.defaultPrevented || event.isComposing ||
+          event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable ||
+          target.matches("textarea, input, button, select, a[href]"))) return;
+      if (!hasScript) return;
+      event.preventDefault();
+      if (event.repeat) return;
+
+      if (frame === null) startPlayback();
+      else stop("一時停止中");
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      lastTime = null;
+    });
+
+    try {
+      draft.value = localStorage.getItem(storageKey) ?? "";
+      if (draft.value) saveStatus.textContent = "このブラウザに保存済み";
+    } catch {
+      showStorageError();
+    }
+
+    updateSpeed();
+    updateFontSize();
+    showDraft();
+    new ResizeObserver(updateSpacing).observe(viewport);
+  </script>
+</body>
+</html>
